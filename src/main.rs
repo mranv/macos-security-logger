@@ -27,13 +27,13 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // Initialize tracing
-    let subscriber = tracing_subscriber::FmtSubscriber::builder()
+    tracing_subscriber::FmtSubscriber::builder()
         .with_env_filter(if args.verbose { "debug" } else { "info" })
         .with_file(true)
         .with_line_number(true)
         .with_thread_ids(true)
         .pretty()
-        .init();
+        .init()?;
 
     info!("Starting macOS security log collector...");
 

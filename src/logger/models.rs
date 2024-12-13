@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Local};
 use zeroize::Zeroize;
+use crate::utils;
 
-#[derive(Debug, Serialize, Deserialize, Zeroize)]
+#[derive(Debug, Serialize, Deserialize, Zeroize, Clone)]
 pub struct LogEntry {
     pub timestamp: DateTime<Local>,
     pub event_type: String,
@@ -15,7 +16,7 @@ pub struct LogEntry {
     pub metadata: Option<LogMetadata>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LogMetadata {
     pub source_file: Option<String>,
     pub line_number: Option<u32>,

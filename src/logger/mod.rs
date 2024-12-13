@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::error::LoggerError;
 use crate::utils;
-use chrono::{DateTime, Local};
+use chrono::Local;
 use std::process::Command;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;

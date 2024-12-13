@@ -1,0 +1,13 @@
+{
+    "output_dir": "./logs",
+    "retention_days": 30,
+    "max_file_size": 104857600,
+    "log_patterns": [
+        "subsystem == \"com.apple.security\"",
+        "eventType == \"security_violation\"",
+        "category == \"security\"",
+        "process == \"socketfilterfw\"",
+        "process == \"sandboxd\"",
+        "process == \"securityd\""
+    ]
+}
