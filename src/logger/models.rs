@@ -19,11 +19,11 @@ pub struct LogEntry {
     #[serde(rename = "timestamp")]
     pub timestamp: DateTime<Local>,
     
-    #[serde(rename = "eventMessage")]
-    pub message: String,
+    #[serde(rename = "eventMessage", alias = "message", default)]
+    pub message: Option<String>,
     
-    #[serde(rename = "processName")]
-    pub process: String,
+    #[serde(rename = "processName", alias = "process", default)]
+    pub process: Option<String>,
     
     #[serde(rename = "subsystem", default)]
     pub subsystem: Option<String>,
@@ -31,14 +31,11 @@ pub struct LogEntry {
     #[serde(rename = "category", default)]
     pub category: Option<String>,
     
-    #[serde(rename = "processID")]
+    #[serde(rename = "processID", alias = "pid", default)]
     pub pid: Option<FlexibleType>,
     
-    #[serde(rename = "threadID")]
+    #[serde(rename = "threadID", alias = "tid", default)]
     pub thread_id: Option<FlexibleType>,
-    
-    #[serde(rename = "senderImagePath", default)]
-    pub sender_image_path: Option<String>,
     
     #[serde(flatten)]
     pub additional_fields: serde_json::Map<String, Value>,
@@ -46,16 +43,17 @@ pub struct LogEntry {
 
 impl Zeroize for LogEntry {
     fn zeroize(&mut self) {
-        self.message.zeroize();
-        self.process.zeroize();
+        if let Some(msg) = &mut self.message {
+            msg.zeroize();
+        }
+        if let Some(proc) = &mut self.process {
+            proc.zeroize();
+        }
         if let Some(s) = &mut self.subsystem {
             s.zeroize();
         }
         if let Some(c) = &mut self.category {
             c.zeroize();
-        }
-        if let Some(path) = &mut self.sender_image_path {
-            path.zeroize();
         }
     }
 }
@@ -84,18 +82,6 @@ impl LogOutput {
                 os_version: utils::get_os_version(),
             },
             logs: logs.to_vec(),
-        }
-    }
-}
-
-impl From<FlexibleType> for String {
-    fn from(value: FlexibleType) -> Self {
-        match value {
-            FlexibleType::String(s) => s,
-            FlexibleType::Integer(i) => i.to_string(),
-            FlexibleType::Float(f) => f.to_string(),
-            FlexibleType::Boolean(b) => b.to_string(),
-            FlexibleType::Null => "null".to_string(),
         }
     }
 }

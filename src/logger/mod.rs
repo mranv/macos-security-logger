@@ -46,7 +46,7 @@ impl LogCollector {
                 .arg("--style")
                 .arg("json")
                 .arg("--last")
-                .arg("24h")  // Get last 24 hours of logs
+                .arg("24h")
                 .output()
                 .map_err(LoggerError::CommandError)?;
 
@@ -58,10 +58,28 @@ impl LogCollector {
                 continue;
             }
 
-            let entries: Vec<LogEntry> = serde_json::from_slice(&output.stdout)
-                .map_err(LoggerError::ParseError)?;
+            // Debug: Print raw output
+            let raw_output = String::from_utf8_lossy(&output.stdout);
+            debug!("Raw log output: {}", raw_output);
 
-            logs.extend(entries);
+            // Try parsing as array first
+            if let Ok(entries) = serde_json::from_str::<Vec<LogEntry>>(&raw_output) {
+                logs.extend(entries);
+                continue;
+            }
+
+            // If array parsing fails, try parsing as single object
+            if let Ok(entry) = serde_json::from_str::<LogEntry>(&raw_output) {
+                logs.push(entry);
+                continue;
+            }
+
+            // If both fail, try to save the raw output for inspection
+            let debug_file = format!("debug_log_{}.json", Local::now().timestamp());
+            tokio::fs::write(&debug_file, raw_output.as_bytes()).await
+                .map_err(|e| LoggerError::FileAccessError(e.to_string()))?;
+            
+            error!("Failed to parse log output. Debug file saved to: {}", debug_file);
         }
 
         Ok(logs)
@@ -79,7 +97,7 @@ impl LogCollector {
 
         let output = LogOutput::new(logs);
         let json = serde_json::to_string_pretty(&output)
-            .map_err(LoggerError::ParseError)?;
+            .map_err(|e| LoggerError::ParseError(e.into()))?;
 
         file.write_all(json.as_bytes())
             .await
