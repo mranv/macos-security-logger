@@ -10,10 +10,4 @@ pub enum LoggerError {
 
     #[error("Failed to access log file: {0}")]
     FileAccessError(String),
-
-    #[error("Configuration error: {0}")]
-    ConfigError(String),
-
-    #[error("Invalid log format: {0}")]
-    InvalidFormat(String),
 }
