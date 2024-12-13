@@ -3,7 +3,7 @@ use chrono::{DateTime, Local};
 use zeroize::Zeroize;
 use crate::utils;
 
-#[derive(Debug, Serialize, Deserialize, Zeroize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LogEntry {
     pub timestamp: DateTime<Local>,
     pub event_type: String,
@@ -12,8 +12,16 @@ pub struct LogEntry {
     pub pid: Option<i32>,
     pub facility: Option<String>,
     pub priority: Option<String>,
-    #[zeroize(skip)]
     pub metadata: Option<LogMetadata>,
+}
+
+impl Zeroize for LogEntry {
+    fn zeroize(&mut self) {
+        self.event_type.zeroize();
+        self.process.zeroize();
+        self.message.zeroize();
+        // Note: we don't zeroize timestamp as it doesn't implement Zeroize
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
         .with_line_number(true)
         .with_thread_ids(true)
         .pretty()
-        .init()?;
+        .init();
 
     info!("Starting macOS security log collector...");
 
