@@ -45,6 +45,8 @@ impl LogCollector {
                 .arg(pattern)
                 .arg("--style")
                 .arg("json")
+                .arg("--last")
+                .arg("24h")  // Get last 24 hours of logs
                 .output()
                 .map_err(LoggerError::CommandError)?;
 

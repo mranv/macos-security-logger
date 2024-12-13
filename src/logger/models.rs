@@ -5,22 +5,35 @@ use crate::utils;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LogEntry {
+    #[serde(rename = "timestamp")]
     pub timestamp: DateTime<Local>,
-    pub event_type: String,
-    pub process: String,
+    #[serde(rename = "eventMessage")]
     pub message: String,
+    #[serde(rename = "processName")]
+    pub process: String,
+    #[serde(rename = "subsystem", default)]
+    pub subsystem: String,
+    #[serde(rename = "category", default)]
+    pub category: String,
+    #[serde(rename = "processID")]
     pub pid: Option<i32>,
-    pub facility: Option<String>,
-    pub priority: Option<String>,
-    pub metadata: Option<LogMetadata>,
+    #[serde(rename = "threadID")]
+    pub thread_id: Option<String>,
+    #[serde(rename = "senderImagePath", default)]
+    pub sender_image_path: Option<String>,
+    #[serde(flatten)]
+    pub additional_fields: serde_json::Value,
 }
 
 impl Zeroize for LogEntry {
     fn zeroize(&mut self) {
-        self.event_type.zeroize();
-        self.process.zeroize();
         self.message.zeroize();
-        // Note: we don't zeroize timestamp as it doesn't implement Zeroize
+        self.process.zeroize();
+        self.subsystem.zeroize();
+        self.category.zeroize();
+        if let Some(path) = &mut self.sender_image_path {
+            path.zeroize();
+        }
     }
 }
 

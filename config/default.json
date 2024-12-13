@@ -3,11 +3,8 @@
     "retention_days": 30,
     "max_file_size": 104857600,
     "log_patterns": [
-        "subsystem == \"com.apple.security\"",
-        "eventType == \"security_violation\"",
-        "category == \"security\"",
-        "process == \"socketfilterfw\"",
-        "process == \"sandboxd\"",
-        "process == \"securityd\""
+        "process == \"securityd\" OR process == \"sandboxd\" OR process == \"socketfilterfw\"",
+        "category == \"security\" OR subsystem == \"com.apple.security\"",
+        "eventMessage CONTAINS[c] \"security\" OR eventMessage CONTAINS[c] \"violation\" OR eventMessage CONTAINS[c] \"denied\""
     ]
 }
