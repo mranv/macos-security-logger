@@ -1,7 +1,7 @@
 use std::path::Path;
 use serde_json::Value;
 use tokio::fs;
-use macos_security_logger::{Config, LogCollector};
+use macos_security_logger::{Config, LogCollector, LoggerError};
 
 #[tokio::test]
 async fn test_log_collection() {
@@ -69,18 +69,48 @@ async fn test_log_rotation() {
 #[tokio::test]
 async fn test_invalid_config() {
     let temp_dir = tempfile::tempdir().unwrap();
+    
+    // Test invalid retention days
     let config = Config {
-        output_dir: temp_dir.path().join("nonexistent"),
-        retention_days: 0, // Invalid retention days
-        max_file_size: 0,  // Invalid file size
+        output_dir: temp_dir.path().to_path_buf(),
+        retention_days: 0,
+        max_file_size: 1024,
         save_raw_json: true,
         json_pretty_print: true,
-        log_patterns: vec![],  // Empty patterns
+        log_patterns: vec!["subsystem == \"com.apple.security\"".to_string()],
     };
 
     let collector = LogCollector::new(config);
     let result = collector.collect_logs().await;
-    assert!(result.is_err(), "Expected error with invalid config");
+    assert!(matches!(result, Err(LoggerError::ConfigError(_))));
+
+    // Test invalid file size
+    let config = Config {
+        output_dir: temp_dir.path().to_path_buf(),
+        retention_days: 7,
+        max_file_size: 0,
+        save_raw_json: true,
+        json_pretty_print: true,
+        log_patterns: vec!["subsystem == \"com.apple.security\"".to_string()],
+    };
+
+    let collector = LogCollector::new(config);
+    let result = collector.collect_logs().await;
+    assert!(matches!(result, Err(LoggerError::ConfigError(_))));
+
+    // Test empty patterns
+    let config = Config {
+        output_dir: temp_dir.path().to_path_buf(),
+        retention_days: 7,
+        max_file_size: 1024,
+        save_raw_json: true,
+        json_pretty_print: true,
+        log_patterns: vec![],
+    };
+
+    let collector = LogCollector::new(config);
+    let result = collector.collect_logs().await;
+    assert!(matches!(result, Err(LoggerError::ConfigError(_))));
 }
 
 // Helper functions

@@ -3,9 +3,8 @@ use crate::error::LoggerError;
 use crate::utils;
 use chrono::Local;
 use std::process::Command;
-use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
 use tracing::{debug, error, info};
+use tokio::fs;
 
 pub mod models;
 use models::{LogEntry, LogOutput};
@@ -19,13 +18,36 @@ impl LogCollector {
         Self { config }
     }
 
+    fn validate_config(&self) -> Result<(), LoggerError> {
+        if self.config.retention_days == 0 {
+            return Err(LoggerError::ConfigError("retention_days must be greater than 0".to_string()));
+        }
+        if self.config.max_file_size == 0 {
+            return Err(LoggerError::ConfigError("max_file_size must be greater than 0".to_string()));
+        }
+        if self.config.log_patterns.is_empty() {
+            return Err(LoggerError::ConfigError("log_patterns cannot be empty".to_string()));
+        }
+        Ok(())
+    }
+
     pub async fn collect_logs(&self) -> Result<(), LoggerError> {
+        // Validate configuration first
+        self.validate_config()?;
+
         info!("Starting log collection");
         let logs = self.read_security_logs().await?;
         
         if logs.is_empty() {
             info!("No logs found matching criteria");
             return Ok(());
+        }
+
+        // Ensure output directory exists
+        if !self.config.output_dir.exists() {
+            fs::create_dir_all(&self.config.output_dir)
+                .await
+                .map_err(|e| LoggerError::FileAccessError(format!("Failed to create output directory: {}", e)))?;
         }
 
         // Save formatted logs
@@ -60,29 +82,25 @@ impl LogCollector {
                 .arg("--last")
                 .arg("24h")
                 .output()
-                .map_err(LoggerError::CommandError)?;
+                .map_err(|e| LoggerError::CommandError(e))?;
 
             if !output.status.success() {
-                error!(
-                    "Log command failed: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                continue;
+                let error_msg = String::from_utf8_lossy(&output.stderr);
+                error!("Log command failed: {}", error_msg);
+                return Err(LoggerError::CommandError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    error_msg.to_string(),
+                )));
             }
 
             let raw_output = String::from_utf8_lossy(&output.stdout);
-            
+            debug!("Raw log output sample: {:.200}...", raw_output);
+
             // Save raw command output for debugging
-            File::create(&raw_output_path)
-                .await
-                .map_err(|e| LoggerError::FileAccessError(e.to_string()))?
-                .write_all(raw_output.as_bytes())
-                .await
-                .map_err(|e| LoggerError::FileAccessError(e.to_string()))?;
+            if let Err(e) = fs::write(&raw_output_path, raw_output.as_bytes()).await {
+                error!("Failed to save raw output: {}", e);
+            }
 
-            debug!("Saved raw command output to {:?}", raw_output_path);
-
-            // Parse the output
             match serde_json::from_str::<Vec<LogEntry>>(&raw_output) {
                 Ok(entries) => {
                     info!("Successfully parsed {} log entries", entries.len());
@@ -90,14 +108,13 @@ impl LogCollector {
                 }
                 Err(e) => {
                     error!("Failed to parse log entries: {}", e);
-                    // Save the problematic output to a debug file
+                    // Save problematic output
                     let debug_file = self.config.output_dir.join(
                         format!("debug_log_{}.json", timestamp)
                     );
-                    tokio::fs::write(&debug_file, raw_output.as_bytes())
-                        .await
-                        .map_err(|e| LoggerError::FileAccessError(e.to_string()))?;
-                    error!("Saved problematic output to {:?}", debug_file);
+                    if let Err(write_err) = fs::write(&debug_file, raw_output.as_bytes()).await {
+                        error!("Failed to save debug file: {}", write_err);
+                    }
                 }
             }
         }
@@ -116,12 +133,9 @@ impl LogCollector {
             serde_json::to_string_pretty(&output)
         } else {
             serde_json::to_string(&output)
-        }.map_err(|e| LoggerError::ParseError(e.into()))?;
+        }.map_err(|e| LoggerError::ParseError(e))?;
 
-        File::create(&output_path)
-            .await
-            .map_err(|e| LoggerError::FileAccessError(e.to_string()))?
-            .write_all(json.as_bytes())
+        fs::write(&output_path, json)
             .await
             .map_err(|e| LoggerError::FileAccessError(e.to_string()))?;
 
@@ -139,12 +153,9 @@ impl LogCollector {
             serde_json::to_string_pretty(logs)
         } else {
             serde_json::to_string(logs)
-        }.map_err(|e| LoggerError::ParseError(e.into()))?;
+        }.map_err(|e| LoggerError::ParseError(e))?;
 
-        File::create(&raw_path)
-            .await
-            .map_err(|e| LoggerError::FileAccessError(e.to_string()))?
-            .write_all(json.as_bytes())
+        fs::write(&raw_path, json)
             .await
             .map_err(|e| LoggerError::FileAccessError(e.to_string()))?;
 
