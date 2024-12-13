@@ -28,24 +28,29 @@ impl LogCollector {
             return Ok(());
         }
 
-        // Save formatted JSON
+        // Save formatted logs
+        info!("Saving {} log entries", logs.len());
         self.save_logs(&logs).await?;
-        
-        // Save raw JSON if configured
+
+        // Save raw logs if configured
         if self.config.save_raw_json {
             self.save_raw_json(&logs).await?;
         }
-        
+
         self.rotate_logs().await?;
-        
         Ok(())
     }
 
     async fn read_security_logs(&self) -> Result<Vec<LogEntry>, LoggerError> {
         debug!("Reading security logs");
         let mut logs = Vec::new();
+        debug!("Using output directory: {:?}", self.config.output_dir);
+
+        let timestamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
+        let raw_output_path = self.config.output_dir.join(format!("raw_output_{}.json", timestamp));
 
         for pattern in &self.config.log_patterns {
+            debug!("Processing log pattern: {}", pattern);
             let output = Command::new("log")
                 .arg("show")
                 .arg("--predicate")
@@ -66,31 +71,35 @@ impl LogCollector {
             }
 
             let raw_output = String::from_utf8_lossy(&output.stdout);
-            debug!("Raw log output sample: {:.200}...", raw_output);
-
-            // Try parsing as array first
-            if let Ok(entries) = serde_json::from_str::<Vec<LogEntry>>(&raw_output) {
-                info!("Successfully parsed {} log entries", entries.len());
-                logs.extend(entries);
-                continue;
-            }
-
-            // If array parsing fails, try parsing as single object
-            if let Ok(entry) = serde_json::from_str::<LogEntry>(&raw_output) {
-                info!("Successfully parsed single log entry");
-                logs.push(entry);
-                continue;
-            }
-
-            // Save raw output for debugging
-            let debug_file = self.config.output_dir.join(
-                format!("debug_log_{}.json", Local::now().format("%Y%m%d_%H%M%S"))
-            );
             
-            tokio::fs::write(&debug_file, raw_output.as_bytes()).await
+            // Save raw command output for debugging
+            File::create(&raw_output_path)
+                .await
+                .map_err(|e| LoggerError::FileAccessError(e.to_string()))?
+                .write_all(raw_output.as_bytes())
+                .await
                 .map_err(|e| LoggerError::FileAccessError(e.to_string()))?;
-            
-            error!("Failed to parse log output. Debug file saved to: {:?}", debug_file);
+
+            debug!("Saved raw command output to {:?}", raw_output_path);
+
+            // Parse the output
+            match serde_json::from_str::<Vec<LogEntry>>(&raw_output) {
+                Ok(entries) => {
+                    info!("Successfully parsed {} log entries", entries.len());
+                    logs.extend(entries);
+                }
+                Err(e) => {
+                    error!("Failed to parse log entries: {}", e);
+                    // Save the problematic output to a debug file
+                    let debug_file = self.config.output_dir.join(
+                        format!("debug_log_{}.json", timestamp)
+                    );
+                    tokio::fs::write(&debug_file, raw_output.as_bytes())
+                        .await
+                        .map_err(|e| LoggerError::FileAccessError(e.to_string()))?;
+                    error!("Saved problematic output to {:?}", debug_file);
+                }
+            }
         }
 
         Ok(logs)
@@ -102,10 +111,6 @@ impl LogCollector {
             format!("security_logs_{}.json", timestamp)
         );
 
-        let mut file = File::create(&output_path)
-            .await
-            .map_err(|e| LoggerError::FileAccessError(e.to_string()))?;
-
         let output = LogOutput::new(logs);
         let json = if self.config.json_pretty_print {
             serde_json::to_string_pretty(&output)
@@ -113,11 +118,14 @@ impl LogCollector {
             serde_json::to_string(&output)
         }.map_err(|e| LoggerError::ParseError(e.into()))?;
 
-        file.write_all(json.as_bytes())
+        File::create(&output_path)
+            .await
+            .map_err(|e| LoggerError::FileAccessError(e.to_string()))?
+            .write_all(json.as_bytes())
             .await
             .map_err(|e| LoggerError::FileAccessError(e.to_string()))?;
 
-        info!("Saved {} log entries to {:?}", logs.len(), output_path);
+        info!("Saved formatted logs to {:?}", output_path);
         Ok(())
     }
 
@@ -127,21 +135,20 @@ impl LogCollector {
             format!("security_logs_raw_{}.json", timestamp)
         );
 
-        let mut file = File::create(&raw_path)
-            .await
-            .map_err(|e| LoggerError::FileAccessError(e.to_string()))?;
-
         let json = if self.config.json_pretty_print {
-            serde_json::to_string_pretty(&logs)
+            serde_json::to_string_pretty(logs)
         } else {
-            serde_json::to_string(&logs)
+            serde_json::to_string(logs)
         }.map_err(|e| LoggerError::ParseError(e.into()))?;
 
-        file.write_all(json.as_bytes())
+        File::create(&raw_path)
+            .await
+            .map_err(|e| LoggerError::FileAccessError(e.to_string()))?
+            .write_all(json.as_bytes())
             .await
             .map_err(|e| LoggerError::FileAccessError(e.to_string()))?;
 
-        info!("Saved raw JSON to {:?}", raw_path);
+        info!("Saved raw logs to {:?}", raw_path);
         Ok(())
     }
 

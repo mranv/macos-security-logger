@@ -1,5 +1,7 @@
 use clap::Parser;
 use tracing::{info, error};
+use tokio::fs;
+use std::path::Path;
 
 mod config;
 mod error;
@@ -38,6 +40,13 @@ async fn main() -> anyhow::Result<()> {
     info!("Starting macOS security log collector...");
 
     let config = Config::load(args.config.as_deref())?;
+    
+    // Ensure output directory exists
+    if !Path::new(&config.output_dir).exists() {
+        info!("Creating output directory: {:?}", config.output_dir);
+        fs::create_dir_all(&config.output_dir).await?;
+    }
+
     let collector = LogCollector::new(config);
 
     match collector.collect_logs().await {
