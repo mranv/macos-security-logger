@@ -2,6 +2,8 @@
     "output_dir": "./logs",
     "retention_days": 30,
     "max_file_size": 104857600,
+    "save_raw_json": true,
+    "json_pretty_print": true,
     "log_patterns": [
         "process == \"securityd\" OR process == \"sandboxd\" OR process == \"socketfilterfw\"",
         "category == \"security\" OR subsystem == \"com.apple.security\"",

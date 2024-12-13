@@ -6,7 +6,19 @@ pub struct Config {
     pub output_dir: PathBuf,
     pub retention_days: u32,
     pub max_file_size: usize,
+    #[serde(default = "default_save_raw_json")]
+    pub save_raw_json: bool,
+    #[serde(default = "default_json_pretty_print")]
+    pub json_pretty_print: bool,
     pub log_patterns: Vec<String>,
+}
+
+fn default_save_raw_json() -> bool {
+    true
+}
+
+fn default_json_pretty_print() -> bool {
+    true
 }
 
 impl Config {
