@@ -3,13 +3,7 @@ use tracing::{info, error};
 use tokio::fs;
 use std::path::Path;
 
-mod config;
-mod error;
-mod logger;
-mod utils;
-
-use crate::config::Config;
-use crate::logger::LogCollector;
+use macos_security_logger::{Config, LogCollector};
 
 #[derive(Parser)]
 #[command(author, version, about)]
