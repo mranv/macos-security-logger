@@ -27,7 +27,7 @@ struct Args {
     #[arg(long)]
     verbose: bool,
 
-    /// Time range in hours (e.g., 24 for last 24 hours)
+    /// Time range in hours (e.g., 1 for last 1 hour)
     #[arg(long)]
     hours: Option<u32>,
 
@@ -169,12 +169,12 @@ mod tests {
         let args = Args::try_parse_from([
             "program",
             "--verbose",
-            "--hours", "24",
+            "--hours", "1",
             "--categories", "network_security,authentication",
         ]).unwrap();
 
         assert!(args.verbose);
-        assert_eq!(args.hours, Some(24));
+        assert_eq!(args.hours, Some(1));
         assert_eq!(
             args.categories,
             Some(vec!["network_security".to_string(), "authentication".to_string()])
@@ -185,14 +185,14 @@ mod tests {
     fn test_config_update() {
         let args = Args::try_parse_from([
             "program",
-            "--hours", "24",
+            "--hours", "1",
             "--format", "json",
         ]).unwrap();
 
         let mut config = Config::load(None).unwrap();
         update_config_from_args(&mut config, &args).unwrap();
 
-        assert_eq!(config.time_range, Some("24h".to_string()));
+        assert_eq!(config.time_range, Some("1h".to_string()));
         assert!(!config.json_pretty_print);
     }
 

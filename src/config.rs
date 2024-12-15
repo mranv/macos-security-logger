@@ -83,9 +83,9 @@ impl Config {
         }
 
         if args.is_empty() {
-            // Default to last 24 hours if no time range specified
+            // Default to last 1 hour if no time range specified
             args.push("--last".to_string());
-            args.push("24h".to_string());
+            args.push("1h".to_string());
         }
 
         args
