@@ -5,56 +5,116 @@
     "save_raw_json": true,
     "json_pretty_print": true,
     "log_patterns": {
-        "authentication": [
-            "process == \"authd\" OR process == \"authorization\"",
-            "process == \"SecurityAgent\"",
-            "process == \"sudo\"",
-            "process == \"login\" OR process == \"Terminal\""
+        "malware_protection": [
+            "process == \"XProtectService\" OR process == \"XProtect\"",
+            "process == \"MRT\"",
+            "eventMessage CONTAINS[c] \"quarantine\"",
+            "subsystem == \"com.apple.xprotect\"",
+            "category == \"malware\""
         ],
-        "kernel_security": [
-            "process == \"kernel\" AND category == \"security\"",
+        "system_integrity": [
+            "eventMessage CONTAINS \"System Integrity Protection\"",
             "process == \"syspolicyd\"",
-            "subsystem == \"com.apple.security.syspolicy\""
+            "category == \"system_policy\"",
+            "eventMessage CONTAINS[c] \"SIP\"",
+            "eventMessage CONTAINS \"boot security\""
         ],
-        "filesystem_security": [
-            "category == \"fs\" AND eventMessage CONTAINS[c] \"permission\"",
-            "process == \"opendirectoryd\"",
-            "process == \"fseventsd\"",
-            "process == \"diskmanagementd\""
+        "secure_hardware": [
+            "category == \"secure-enclave\"",
+            "eventMessage CONTAINS \"T2\"",
+            "eventMessage CONTAINS \"secure boot\"",
+            "subsystem == \"com.apple.security.SecureElement\""
+        ],
+        "privacy_control": [
+            "subsystem == \"com.apple.TCC\"",
+            "category == \"privacy\"",
+            "process == \"tcd\"",
+            "eventMessage CONTAINS \"location\"",
+            "eventMessage CONTAINS[c] \"camera\" OR eventMessage CONTAINS[c] \"microphone\""
+        ],
+        "keychain_security": [
+            "process == \"securityd\" AND eventMessage CONTAINS \"keychain\"",
+            "category == \"certificate\"",
+            "eventMessage CONTAINS \"identity verification\"",
+            "subsystem == \"com.apple.security.keychain\""
+        ],
+        "sandbox_monitoring": [
+            "process == \"sandboxd\"",
+            "category == \"sandbox\"",
+            "eventMessage CONTAINS[c] \"container access\"",
+            "eventMessage CONTAINS \"entitlement\""
+        ],
+        "disk_encryption": [
+            "process == \"filevaultd\"",
+            "eventMessage CONTAINS \"FileVault\"",
+            "category == \"encryption\"",
+            "eventMessage CONTAINS \"recovery key\""
         ],
         "network_security": [
             "process == \"socketfilterfw\"",
-            "category == \"network\" AND eventMessage CONTAINS \"filter\"",
-            "eventMessage CONTAINS[c] \"connection blocked\"",
-            "process == \"networkd\"",
-            "process == \"mDNSResponder\"",
-            "subsystem == \"com.apple.network.security\""
+            "category == \"network\"",
+            "subsystem == \"com.apple.network.security\"",
+            "process == \"vpnd\"",
+            "eventMessage CONTAINS \"firewall\""
         ],
-        "application_security": [
-            "eventMessage CONTAINS \"Gatekeeper\"",
-            "process == \"XProtect\"",
-            "process == \"sandboxd\"",
-            "category == \"sandbox\"",
-            "eventMessage CONTAINS[c] \"violation\""
+        "authentication": [
+            "category == \"authentication\"",
+            "eventMessage CONTAINS \"Touch ID\"",
+            "eventMessage CONTAINS \"smart card\"",
+            "eventMessage CONTAINS \"password policy\"",
+            "process == \"authd\""
         ],
-        "privacy_protection": [
-            "subsystem == \"com.apple.TCC\"",
-            "process == \"tcd\"",
-            "category == \"privacy\"",
-            "process == \"securityd\" AND eventMessage CONTAINS \"keychain\"",
-            "category == \"certificate\""
+        "system_updates": [
+            "process == \"softwareupdate\"",
+            "category == \"installation\"",
+            "eventMessage CONTAINS \"security update\"",
+            "subsystem == \"com.apple.softwareupdate\""
         ],
-        "system_integrity": [
-            "eventMessage CONTAINS \"code signing\"",
-            "category == \"signature\"",
-            "subsystem == \"com.apple.security.assessment\"",
-            "process == \"softwareupdated\"",
-            "category == \"update\" AND eventMessage CONTAINS \"security\""
+        "code_signing": [
+            "category == \"code-signing\"",
+            "eventMessage CONTAINS \"notarization\"",
+            "process == \"codesign\"",
+            "eventMessage CONTAINS \"signature\""
         ],
-        "high_priority": [
-            "category == \"security\" AND eventMessage CONTAINS[c] \"critical\"",
-            "eventMessage CONTAINS[c] \"failed\" OR eventMessage CONTAINS[c] \"failure\"",
-            "eventMessage CONTAINS[c] \"breach\" OR eventMessage CONTAINS[c] \"compromise\""
+        "mdm_security": [
+            "category == \"mdm\"",
+            "subsystem == \"com.apple.ManagedClient\"",
+            "eventMessage CONTAINS \"profile\""
+        ],
+        "backup_security": [
+            "process == \"backupd\"",
+            "category == \"backup\"",
+            "eventMessage CONTAINS \"Time Machine encryption\""
+        ],
+        "icloud_security": [
+            "subsystem == \"com.apple.cloudd\"",
+            "category == \"icloud\"",
+            "eventMessage CONTAINS \"keychain sync\""
+        ],
+        "app_store_security": [
+            "process == \"appstored\"",
+            "category == \"store\"",
+            "eventMessage CONTAINS \"app validation\""
+        ]
+    },
+    "priority_events": {
+        "critical": [
+            "SIP violation",
+            "malware detected",
+            "keychain security breach",
+            "unauthorized access",
+            "encryption failure"
+        ],
+        "high": [
+            "authentication failure",
+            "firewall violation",
+            "sandbox escape",
+            "certificate invalid"
+        ],
+        "medium": [
+            "permission change",
+            "config modification",
+            "update failure"
         ]
     }
 }
