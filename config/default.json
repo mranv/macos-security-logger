@@ -4,9 +4,57 @@
     "max_file_size": 104857600,
     "save_raw_json": true,
     "json_pretty_print": true,
-    "log_patterns": [
-        "process == \"securityd\" OR process == \"sandboxd\"",
-        "category == \"security\"",
-        "subsystem == \"com.apple.security\""
-    ]
+    "log_patterns": {
+        "authentication": [
+            "process == \"authd\" OR process == \"authorization\"",
+            "process == \"SecurityAgent\"",
+            "process == \"sudo\"",
+            "process == \"login\" OR process == \"Terminal\""
+        ],
+        "kernel_security": [
+            "process == \"kernel\" AND category == \"security\"",
+            "process == \"syspolicyd\"",
+            "subsystem == \"com.apple.security.syspolicy\""
+        ],
+        "filesystem_security": [
+            "category == \"fs\" AND eventMessage CONTAINS[c] \"permission\"",
+            "process == \"opendirectoryd\"",
+            "process == \"fseventsd\"",
+            "process == \"diskmanagementd\""
+        ],
+        "network_security": [
+            "process == \"socketfilterfw\"",
+            "category == \"network\" AND eventMessage CONTAINS \"filter\"",
+            "eventMessage CONTAINS[c] \"connection blocked\"",
+            "process == \"networkd\"",
+            "process == \"mDNSResponder\"",
+            "subsystem == \"com.apple.network.security\""
+        ],
+        "application_security": [
+            "eventMessage CONTAINS \"Gatekeeper\"",
+            "process == \"XProtect\"",
+            "process == \"sandboxd\"",
+            "category == \"sandbox\"",
+            "eventMessage CONTAINS[c] \"violation\""
+        ],
+        "privacy_protection": [
+            "subsystem == \"com.apple.TCC\"",
+            "process == \"tcd\"",
+            "category == \"privacy\"",
+            "process == \"securityd\" AND eventMessage CONTAINS \"keychain\"",
+            "category == \"certificate\""
+        ],
+        "system_integrity": [
+            "eventMessage CONTAINS \"code signing\"",
+            "category == \"signature\"",
+            "subsystem == \"com.apple.security.assessment\"",
+            "process == \"softwareupdated\"",
+            "category == \"update\" AND eventMessage CONTAINS \"security\""
+        ],
+        "high_priority": [
+            "category == \"security\" AND eventMessage CONTAINS[c] \"critical\"",
+            "eventMessage CONTAINS[c] \"failed\" OR eventMessage CONTAINS[c] \"failure\"",
+            "eventMessage CONTAINS[c] \"breach\" OR eventMessage CONTAINS[c] \"compromise\""
+        ]
+    }
 }

@@ -3,37 +3,72 @@ use crate::error::LoggerError;
 use crate::utils;
 use chrono::Local;
 use std::process::Command;
-use tracing::{debug, error, info};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::fs;
+use tokio::signal::ctrl_c;
+use tracing::{debug, error, info, warn};
 
 pub mod models;
+pub mod report;
 use models::{LogEntry, LogOutput};
+use report::SecurityReport;
 
 pub struct LogCollector {
     config: Config,
+    shutdown: Arc<AtomicBool>,
 }
 
 impl LogCollector {
     pub fn new(config: Config) -> Self {
-        Self { config }
+        Self {
+            config,
+            shutdown: Arc::new(AtomicBool::new(false)),
+        }
     }
 
-    fn validate_config(&self) -> Result<(), LoggerError> {
-        if self.config.retention_days == 0 {
-            return Err(LoggerError::ConfigError("retention_days must be greater than 0".to_string()));
-        }
-        if self.config.max_file_size == 0 {
-            return Err(LoggerError::ConfigError("max_file_size must be greater than 0".to_string()));
-        }
-        if self.config.log_patterns.is_empty() {
-            return Err(LoggerError::ConfigError("log_patterns cannot be empty".to_string()));
+    pub async fn run_with_ctrl_c(&self) -> Result<(), LoggerError> {
+        let shutdown = self.shutdown.clone();
+        
+        // Setup CTRL+C handler
+        tokio::spawn(async move {
+            if let Ok(()) = ctrl_c().await {
+                info!("Received CTRL+C, initiating graceful shutdown...");
+                shutdown.store(true, Ordering::SeqCst);
+            }
+        });
+
+        self.collect_logs().await
+    }
+
+    fn analyze_log_format(raw_output: &str) -> Result<(), LoggerError> {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw_output) {
+            if let Some(array) = value.as_array() {
+                if let Some(first) = array.first() {
+                    debug!("Available fields in log entry:");
+                    if let Some(obj) = first.as_object() {
+                        for (key, value_type) in obj {
+                            let type_str = match value_type {
+                                serde_json::Value::String(_) => "string",
+                                serde_json::Value::Number(_) => "number",
+                                serde_json::Value::Bool(_) => "boolean",
+                                serde_json::Value::Array(_) => "array",
+                                serde_json::Value::Object(_) => "object",
+                                serde_json::Value::Null => "null",
+                            };
+                            debug!("  - {} ({})", key, type_str);
+                        }
+                    }
+                }
+            }
         }
         Ok(())
     }
 
     pub async fn collect_logs(&self) -> Result<(), LoggerError> {
         // Validate configuration first
-        self.validate_config()?;
+        self.config.validate()
+            .map_err(|e| LoggerError::ConfigError(e))?;
 
         info!("Starting log collection");
         let logs = self.read_security_logs().await?;
@@ -54,7 +89,14 @@ impl LogCollector {
         info!("Saving {} log entries", logs.len());
         self.save_logs(&logs).await?;
 
-        // Save raw logs if configured
+        // Generate and save security report
+        let report = SecurityReport::new(&logs);
+        let report_path = self.config.output_dir.join(
+            format!("security_report_{}.json", Local::now().format("%Y%m%d_%H%M%S"))
+        );
+        report.save(&report_path)
+            .map_err(|e| LoggerError::FileAccessError(e.to_string()))?;
+
         if self.config.save_raw_json {
             self.save_raw_json(&logs).await?;
         }
@@ -69,51 +111,79 @@ impl LogCollector {
         debug!("Using output directory: {:?}", self.config.output_dir);
 
         let timestamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
-        let raw_output_path = self.config.output_dir.join(format!("raw_output_{}.json", timestamp));
 
-        for pattern in &self.config.log_patterns {
-            debug!("Processing log pattern: {}", pattern);
-            let output = Command::new("log")
-                .arg("show")
-                .arg("--predicate")
-                .arg(pattern)
-                .arg("--style")
-                .arg("json")
-                .arg("--last")
-                .arg("24h")
-                .output()
-                .map_err(|e| LoggerError::CommandError(e))?;
-
-            if !output.status.success() {
-                let error_msg = String::from_utf8_lossy(&output.stderr);
-                error!("Log command failed: {}", error_msg);
-                return Err(LoggerError::CommandError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    error_msg.to_string(),
-                )));
+        for (category, patterns) in &self.config.log_patterns {
+            if self.shutdown.load(Ordering::SeqCst) {
+                warn!("Received shutdown signal, stopping log collection");
+                break;
             }
 
-            let raw_output = String::from_utf8_lossy(&output.stdout);
-            debug!("Raw log output sample: {:.200}...", raw_output);
-
-            // Save raw command output for debugging
-            if let Err(e) = fs::write(&raw_output_path, raw_output.as_bytes()).await {
-                error!("Failed to save raw output: {}", e);
-            }
-
-            match serde_json::from_str::<Vec<LogEntry>>(&raw_output) {
-                Ok(entries) => {
-                    info!("Successfully parsed {} log entries", entries.len());
-                    logs.extend(entries);
+            debug!("Processing category: {}", category);
+            
+            for pattern in patterns {
+                if self.shutdown.load(Ordering::SeqCst) {
+                    break;
                 }
-                Err(e) => {
-                    error!("Failed to parse log entries: {}", e);
-                    // Save problematic output
-                    let debug_file = self.config.output_dir.join(
-                        format!("debug_log_{}.json", timestamp)
+
+                debug!("Processing pattern: {}", pattern);
+                
+                let mut cmd = Command::new("log");
+                cmd.arg("show")
+                   .arg("--predicate")
+                   .arg(pattern)
+                   .arg("--style")
+                   .arg("json");
+
+                // Add time range arguments
+                for arg in self.config.get_time_args() {
+                    cmd.arg(arg);
+                }
+
+                let output = cmd.output()
+                    .map_err(|e| LoggerError::CommandError(e))?;
+
+                if !output.status.success() {
+                    let error_msg = String::from_utf8_lossy(&output.stderr);
+                    error!("Log command failed for pattern '{}': {}", pattern, error_msg);
+                    continue;
+                }
+
+                let raw_output = String::from_utf8_lossy(&output.stdout);
+                
+                // Print sample and analyze format
+                if !raw_output.is_empty() {
+                    if let Some(sample) = raw_output.lines().take(1).next() {
+                        debug!("Sample log entry: {}", sample);
+                        Self::analyze_log_format(sample)?;
+                    }
+
+                    // Save raw output
+                    let raw_output_path = self.config.output_dir.join(
+                        format!("raw_output_{}_{}.json", category, timestamp)
                     );
-                    if let Err(write_err) = fs::write(&debug_file, raw_output.as_bytes()).await {
-                        error!("Failed to save debug file: {}", write_err);
+                    if let Err(e) = fs::write(&raw_output_path, raw_output.as_bytes()).await {
+                        error!("Failed to save raw output: {}", e);
+                    }
+                }
+
+                match serde_json::from_str::<Vec<LogEntry>>(&raw_output) {
+                    Ok(mut entries) => {
+                        for entry in &mut entries {
+                            entry.set_category(category.clone());
+                        }
+                        info!("Successfully parsed {} log entries for category {}", entries.len(), category);
+                        logs.extend(entries);
+                    }
+                    Err(e) => {
+                        error!("Failed to parse log entries for pattern '{}': {}", pattern, e);
+                        if !raw_output.is_empty() {
+                            let debug_file = self.config.output_dir.join(
+                                format!("debug_log_{}_{}.json", category, timestamp)
+                            );
+                            if let Err(write_err) = fs::write(&debug_file, raw_output.as_bytes()).await {
+                                error!("Failed to save debug file: {}", write_err);
+                            }
+                        }
                     }
                 }
             }

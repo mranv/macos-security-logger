@@ -1,4 +1,5 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -10,7 +11,13 @@ pub struct Config {
     pub save_raw_json: bool,
     #[serde(default = "default_json_pretty_print")]
     pub json_pretty_print: bool,
-    pub log_patterns: Vec<String>,
+    pub log_patterns: HashMap<String, Vec<String>>,
+    #[serde(skip)]
+    pub time_range: Option<String>,
+    #[serde(skip)]
+    pub start_time: Option<String>,
+    #[serde(skip)]
+    pub end_time: Option<String>,
 }
 
 fn default_save_raw_json() -> bool {
@@ -19,6 +26,13 @@ fn default_save_raw_json() -> bool {
 
 fn default_json_pretty_print() -> bool {
     true
+}
+
+#[derive(Debug, Serialize)]
+pub struct SecurityStats {
+    pub category: String,
+    pub events_count: usize,
+    pub last_event: Option<String>,
 }
 
 impl Config {
@@ -49,5 +63,61 @@ impl Config {
 
         let config = builder.build()?;
         config.try_deserialize().map_err(Into::into)
+    }
+
+    pub fn get_time_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+
+        if let Some(range) = &self.time_range {
+            args.push("--last".to_string());
+            args.push(range.clone());
+        } else {
+            if let Some(start) = &self.start_time {
+                args.push("--start".to_string());
+                args.push(start.clone());
+            }
+            if let Some(end) = &self.end_time {
+                args.push("--end".to_string());
+                args.push(end.clone());
+            }
+        }
+
+        if args.is_empty() {
+            // Default to last 24 hours if no time range specified
+            args.push("--last".to_string());
+            args.push("24h".to_string());
+        }
+
+        args
+    }
+
+    pub fn filter_categories(&mut self, categories: &[String]) {
+        let all_patterns = self.log_patterns.clone();
+        self.log_patterns.clear();
+
+        for category in categories {
+            if let Some(patterns) = all_patterns.get(category) {
+                self.log_patterns.insert(category.clone(), patterns.clone());
+            }
+        }
+    }
+
+    pub fn get_all_patterns(&self) -> Vec<String> {
+        self.log_patterns.values()
+            .flat_map(|patterns| patterns.clone())
+            .collect()
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.retention_days == 0 {
+            return Err("retention_days must be greater than 0".to_string());
+        }
+        if self.max_file_size == 0 {
+            return Err("max_file_size must be greater than 0".to_string());
+        }
+        if self.log_patterns.is_empty() {
+            return Err("log_patterns cannot be empty".to_string());
+        }
+        Ok(())
     }
 }
