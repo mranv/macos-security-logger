@@ -220,7 +220,7 @@ impl SecurityReport {
                 trend: TrendAnalysis {
                     trend_direction: "stable".to_string(),
                     percentage_change: 0.0,
-                    period: "24h".to_string(),
+                    period: "1h".to_string(),
                 },
             });
 
@@ -562,7 +562,7 @@ impl SecurityReport {
             let age_hours = Local::now()
                 .signed_duration_since(alert.timestamp)
                 .num_hours();
-            if age_hours < 24 {
+            if age_hours < 1 {
                 score += 0.5; // Recent events are higher risk
             }
         }
@@ -645,7 +645,7 @@ mod tests {
             trend: TrendAnalysis {
                 trend_direction: "stable".to_string(),
                 percentage_change: 0.0,
-                period: "24h".to_string(),
+                period: "1h".to_string(),
             },
         });
 
