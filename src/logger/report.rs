@@ -1,7 +1,8 @@
 use chrono::{DateTime, Local};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use crate::logger::models::LogEntry;
+use crate::logger::models::{LogEntry, SecurityLevel};
+
 
 #[derive(Debug, Serialize)]
 pub struct SecurityReport {
@@ -265,9 +266,22 @@ impl SecurityReport {
     }
 
     fn determine_severity(log: &LogEntry) -> String {
-        let message = log.get_message().to_lowercase();
+        // First check the security_level if present
+        if let Some(level) = &log.security_level {
+            return match level {
+                SecurityLevel::Critical => "CRITICAL".to_string(),
+                SecurityLevel::High => "HIGH".to_string(),
+                SecurityLevel::Medium => "MEDIUM".to_string(),
+                SecurityLevel::Low => "LOW".to_string(),
+                SecurityLevel::Info => "LOW".to_string(),
+            };
+        }
         
-        if message.contains("critical") || message.contains("breach") {
+        // If no security_level set, analyze message content
+        let message = log.get_message().to_lowercase();
+        if message.contains("critical") || 
+           message.contains("breach") || 
+           message.contains("malware") {
             "CRITICAL".to_string()
         } else if message.contains("error") || message.contains("failed") {
             "HIGH".to_string()
@@ -281,7 +295,8 @@ impl SecurityReport {
     fn create_security_alert(log: &LogEntry) -> SecurityAlert {
         SecurityAlert {
             timestamp: log.timestamp,
-            category: log.security_category.clone().unwrap_or_else(|| "unknown".to_string()),
+            category: log.security_category.clone()
+                .unwrap_or_else(|| "unknown".to_string()),
             severity: Self::determine_severity(log),
             message: log.get_message(),
             source: log.get_process_name(),
@@ -318,28 +333,54 @@ impl SecurityReport {
         let mut threats = Vec::new();
         let mut anomalies = Vec::new();
         let mut risk_factors = Vec::new();
-
-        let mut source_counts: HashMap<String, usize> = HashMap::new();
-        let mut source_patterns: HashMap<String, Vec<&LogEntry>> = HashMap::new();
-
-        // Analyze patterns
+    
         for log in logs {
-            let source = log.get_process_name();
-            *source_counts.entry(source.clone()).or_insert(0) += 1;
-            source_patterns.entry(source).or_default().push(log);
+            let message = log.get_message().to_lowercase();
+            let severity = log.security_level.as_ref().unwrap_or(&SecurityLevel::Low);
+    
+            // Detect potential threats based on severity
+            match severity {
+                SecurityLevel::Critical | SecurityLevel::High => {
+                    threats.push(ThreatIndicator {
+                        indicator_type: if message.contains("malware") {
+                            "Malware Detection".to_string()
+                        } else if message.contains("login") {
+                            "Authentication Threat".to_string()
+                        } else {
+                            "Security Violation".to_string()
+                        },
+                        confidence: 0.9,
+                        evidence: vec![log.get_message()],
+                        recommendation: match log.security_level {
+                            Some(SecurityLevel::Critical) => "Immediate action required",
+                            Some(SecurityLevel::High) => "Investigate urgently",
+                            _ => "Review and monitor",
+                        }.to_string(),
+                    });
+                }
+                _ => {}
+            }
+    
+            // Detect anomalies
+            if message.contains("failed") || message.contains("multiple") {
+                anomalies.push(AnomalyDetail {
+                    anomaly_type: "Repeated Failure".to_string(),
+                    description: log.get_message(),
+                    severity: "HIGH".to_string(),
+                    affected_components: vec![log.get_process_name()],
+                });
+            }
+    
+            // Add risk factors
+            if let Some(SecurityLevel::High) = log.security_level {
+                risk_factors.push(RiskFactor {
+                    factor: format!("High Severity Event - {}", log.get_process_name()),
+                    impact_level: "HIGH".to_string(),
+                    mitigation_status: "Open".to_string(),
+                });
+            }
         }
-
-        // Process patterns
-        for (source, logs) in source_patterns {
-            Self::analyze_source_patterns(
-                &source,
-                &logs,
-                &mut threats,
-                &mut anomalies,
-                &mut risk_factors
-            );
-        }
-
+    
         ThreatAnalysis {
             potential_threats: threats,
             anomalies,
