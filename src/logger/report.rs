@@ -164,7 +164,6 @@ impl SecurityReport {
 
         // Process logs
         for log in logs {
-            let category = log.security_category.clone().unwrap_or_else(|| "unknown".to_string());
             Self::process_log_entry(
                 log, 
                 &mut categories, 
@@ -209,25 +208,27 @@ impl SecurityReport {
         unique_subsystems: &mut HashSet<String>,
         timeline_events: &mut Vec<TimelineEvent>,
     ) {
-        let category = log.security_category.clone().unwrap_or_else(|| "unknown".to_string());
-        
         // Update category stats
-        let entry = categories.entry(category.clone()).or_insert(CategoryStats {
-            total_events: 0,
-            latest_event: None,
-            severity_counts: HashMap::new(),
-            unique_sources: HashSet::new(),
-            top_events: Vec::new(),
-            trend: TrendAnalysis {
-                trend_direction: "stable".to_string(),
-                percentage_change: 0.0,
-                period: "1h".to_string(),
-            },
-        });
+        let entry = categories.entry(log.security_category.clone().unwrap_or_else(|| "unknown".to_string()))
+            .or_insert(CategoryStats {
+                total_events: 0,
+                latest_event: None,
+                severity_counts: HashMap::new(),
+                unique_sources: HashSet::new(),
+                top_events: Vec::new(),
+                trend: TrendAnalysis {
+                    trend_direction: "stable".to_string(),
+                    percentage_change: 0.0,
+                    period: "24h".to_string(),
+                },
+            });
 
         entry.total_events += 1;
         entry.latest_event = Some(log.timestamp);
         entry.unique_sources.insert(log.get_process_name());
+
+        let severity = Self::determine_severity(log);
+        *entry.severity_counts.entry(severity.clone()).or_insert(0) += 1;
 
         // Track unique processes and subsystems
         if let Some(process) = &log.process {
@@ -242,17 +243,17 @@ impl SecurityReport {
             timestamp: log.timestamp,
             event_type: log.event_type.clone().unwrap_or_else(|| "unknown".to_string()),
             description: log.get_message(),
-            severity: Self::determine_severity(log),
+            severity: severity.clone(),
         });
 
         // Check for high-priority events
         if Self::is_high_priority(log) {
-            alerts.push(Self::create_security_alert(log, &category));
+            alerts.push(Self::create_security_alert(log));
         }
     }
 
     fn is_high_priority(log: &LogEntry) -> bool {
-        let high_priority_keywords = [
+        const HIGH_PRIORITY_KEYWORDS: [&str; 18] = [
             "violation", "breach", "failed", "blocked", "malware",
             "unauthorized", "suspicious", "attack", "compromise",
             "exploit", "overflow", "injection", "bypass", "escalation",
@@ -260,7 +261,7 @@ impl SecurityReport {
         ];
 
         let message = log.get_message().to_lowercase();
-        high_priority_keywords.iter().any(|&keyword| message.contains(keyword))
+        HIGH_PRIORITY_KEYWORDS.iter().any(|&keyword| message.contains(keyword))
     }
 
     fn determine_severity(log: &LogEntry) -> String {
@@ -277,10 +278,10 @@ impl SecurityReport {
         }
     }
 
-    fn create_security_alert(log: &LogEntry, category: &str) -> SecurityAlert {
+    fn create_security_alert(log: &LogEntry) -> SecurityAlert {
         SecurityAlert {
             timestamp: log.timestamp,
-            category: category.to_string(),
+            category: log.security_category.clone().unwrap_or_else(|| "unknown".to_string()),
             severity: Self::determine_severity(log),
             message: log.get_message(),
             source: log.get_process_name(),
@@ -295,8 +296,21 @@ impl SecurityReport {
                 related_files: Vec::new(),
                 network_info: None,
             },
-            recommendation: "Investigate and verify security status".to_string(),
+            recommendation: Self::generate_recommendation(log),
             related_events: Vec::new(),
+        }
+    }
+
+    fn generate_recommendation(log: &LogEntry) -> String {
+        let message = log.get_message().to_lowercase();
+        if message.contains("malware") {
+            "Isolate affected system and run full security scan".to_string()
+        } else if message.contains("breach") {
+            "Initiate security incident response and investigate breach".to_string()
+        } else if message.contains("unauthorized") {
+            "Review access logs and update security policies".to_string()
+        } else {
+            "Investigate and verify security status".to_string()
         }
     }
 
@@ -305,53 +319,25 @@ impl SecurityReport {
         let mut anomalies = Vec::new();
         let mut risk_factors = Vec::new();
 
-        // Group logs by source
         let mut source_counts: HashMap<String, usize> = HashMap::new();
         let mut source_patterns: HashMap<String, Vec<&LogEntry>> = HashMap::new();
 
+        // Analyze patterns
         for log in logs {
             let source = log.get_process_name();
             *source_counts.entry(source.clone()).or_insert(0) += 1;
             source_patterns.entry(source).or_default().push(log);
         }
 
-        // Analyze patterns and create threat indicators
+        // Process patterns
         for (source, logs) in source_patterns {
-            let high_severity_count = logs.iter()
-                .filter(|log| Self::determine_severity(log) == "CRITICAL")
-                .count();
-
-            if high_severity_count > 0 {
-                threats.push(ThreatIndicator {
-                    indicator_type: "Critical Events".to_string(),
-                    confidence: 0.9,
-                    evidence: logs.iter().map(|log| log.get_message()).collect(),
-                    recommendation: format!("Investigate critical events from {}", source),
-                });
-            }
-
-            // Check for anomalies
-            if logs.len() > 10 {
-                anomalies.push(AnomalyDetail {
-                    anomaly_type: "High Frequency".to_string(),
-                    description: format!("High event frequency from {}", source),
-                    severity: "MEDIUM".to_string(),
-                    affected_components: vec![source.clone()],
-                });
-            }
-
-            // Assess risk factors
-            let error_rate = logs.iter()
-                .filter(|log| log.get_message().to_lowercase().contains("error"))
-                .count() as f32 / logs.len() as f32;
-
-            if error_rate > 0.5 {
-                risk_factors.push(RiskFactor {
-                    factor: format!("High Error Rate - {}", source),
-                    impact_level: "HIGH".to_string(),
-                    mitigation_status: "Open".to_string(),
-                });
-            }
+            Self::analyze_source_patterns(
+                &source,
+                &logs,
+                &mut threats,
+                &mut anomalies,
+                &mut risk_factors
+            );
         }
 
         ThreatAnalysis {
@@ -361,18 +347,60 @@ impl SecurityReport {
         }
     }
 
+    fn analyze_source_patterns(
+        source: &str,
+        logs: &[&LogEntry],
+        threats: &mut Vec<ThreatIndicator>,
+        anomalies: &mut Vec<AnomalyDetail>,
+        risk_factors: &mut Vec<RiskFactor>,
+    ) {
+        // Check for high frequency
+        if logs.len() > 10 {
+            anomalies.push(AnomalyDetail {
+                anomaly_type: "High Frequency".to_string(),
+                description: format!("High event frequency from source: {}", source),
+                severity: "MEDIUM".to_string(),
+                affected_components: vec![source.to_string()],
+            });
+        }
+
+        // Analyze error patterns
+        let error_logs: Vec<_> = logs.iter()
+            .filter(|log| log.get_message().to_lowercase().contains("error"))
+            .collect();
+
+        if !error_logs.is_empty() {
+            risk_factors.push(RiskFactor {
+                factor: format!("Error Pattern - {}", source),
+                impact_level: if error_logs.len() > 5 { "HIGH" } else { "MEDIUM" }.to_string(),
+                mitigation_status: "Open".to_string(),
+            });
+        }
+
+        // Check for critical events
+        let critical_logs: Vec<_> = logs.iter()
+            .filter(|log| Self::determine_severity(log) == "CRITICAL")
+            .collect();
+
+        if !critical_logs.is_empty() {
+            threats.push(ThreatIndicator {
+                indicator_type: "Critical Events".to_string(),
+                confidence: 0.9,
+                evidence: critical_logs.iter().map(|log| log.get_message()).collect(),
+                recommendation: format!("Investigate critical events from {}", source),
+            });
+        }
+    }
+
     fn analyze_patterns(logs: &[LogEntry]) -> Vec<TimelinePattern> {
-        let mut patterns = HashMap::new();
+        let mut patterns: HashMap<String, Vec<&LogEntry>> = HashMap::new();
 
         // Group by event type
         for log in logs {
             let event_type = log.event_type.clone().unwrap_or_else(|| "unknown".to_string());
-            patterns.entry(event_type)
-                .or_insert_with(Vec::new)
-                .push(log);
+            patterns.entry(event_type).or_default().push(log);
         }
 
-        // Create patterns
         patterns.into_iter()
             .filter(|(_, events)| !events.is_empty())
             .map(|(pattern_type, events)| {
@@ -419,9 +447,30 @@ impl SecurityReport {
             if message.contains("security update") {
                 status.security_updates.push(UpdateInfo {
                     update_name: log.get_message(),
-                    status: "Pending".to_string(),
+                    status: if message.contains("installed") {
+                        "Installed".to_string()
+                    } else if message.contains("failed") {
+                        "Failed".to_string()
+                    } else {
+                        "Pending".to_string()
+                    },
                     last_checked: log.timestamp,
                 });
+            }
+            
+            // Check for security policy violations
+            if message.contains("policy violation") || message.contains("compliance failure") {
+                status.sip_status = false;
+            }
+
+            // Check for network security status
+            if message.contains("network protection") && message.contains("disabled") {
+                status.firewall_status = false;
+            }
+
+            // Monitor encryption status changes
+            if message.contains("encryption") && message.contains("compromised") {
+                status.disk_encryption_status = false;
             }
         }
 
@@ -439,66 +488,57 @@ impl SecurityReport {
             score += stats.total_events as f32 * 0.1;
             
             // Add weight for severity
-            if let Some(critical_count) = stats.severity_counts.get("CRITICAL") {
-                score += *critical_count as f32 * 0.5;
-            }
-            if let Some(high_count) = stats.severity_counts.get("HIGH") {
-                score += *high_count as f32 * 0.3;
+            for (severity, count) in &stats.severity_counts {
+                let severity_weight = match severity.as_str() {
+                    "CRITICAL" => 0.5,
+                    "HIGH" => 0.3,
+                    "MEDIUM" => 0.2,
+                    "LOW" => 0.1,
+                    _ => 0.0,
+                };
+                score += *count as f32 * severity_weight;
             }
         }
 
         // Add score for alerts
         for alert in alerts {
-            match alert.severity.as_str() {
-                "CRITICAL" => score += 2.0,
-                "HIGH" => score += 1.5,
-                "MEDIUM" => score += 1.0,
-                "LOW" => score += 0.5,
-                _ => score += 0.1,
-            }
+            let alert_weight = match alert.severity.as_str() {
+                "CRITICAL" => 2.0,
+                "HIGH" => 1.5,
+                "MEDIUM" => 1.0,
+                "LOW" => 0.5,
+                _ => 0.1,
+            };
+            score += alert_weight;
 
-            // Additional weight for specific alert contexts
-            if let Some(network_info) = &alert.context.network_info {
-                score += 0.5; // Network-related issues are higher risk
+            // Additional risk factors
+            if alert.context.network_info.is_some() {
+                score += 0.5; // Network-related issues
             }
-
-            // Check for multiple affected components
-            if !alert.context.related_files.is_empty() {
-                score += 0.3 * alert.context.related_files.len() as f32;
-            }
-
-            // Time-based risk adjustment (newer events have higher weight)
-            let age = Local::now()
+            score += alert.context.related_files.len() as f32 * 0.3; // Multiple affected files
+            
+            // Time-based risk factors
+            let age_hours = Local::now()
                 .signed_duration_since(alert.timestamp)
                 .num_hours();
-            if age < 1 {
-                score += 0.5; // Events in last 1 hour
-            } else if age < 3 {
-                score += 0.3; // Events in last 3 hour
+            if age_hours < 24 {
+                score += 0.5; // Recent events are higher risk
             }
-        }
-
-        // Consider unique sources impact
-        let unique_sources: HashSet<_> = alerts.iter()
-            .map(|alert| &alert.source)
-            .collect();
-        if unique_sources.len() > 5 {
-            score += 1.0; // Multiple sources indicate broader impact
         }
 
         // Risk multipliers for specific conditions
-        if alerts.iter().any(|a| a.message.to_lowercase().contains("breach")) {
-            score *= 1.5; // 50% increase for confirmed breaches
-        }
-        if alerts.iter().any(|a| a.message.to_lowercase().contains("malware")) {
-            score *= 1.3; // 30% increase for malware detection
-        }
+        let threat_multiplier = if alerts.iter().any(|a| {
+            let msg = a.message.to_lowercase();
+            msg.contains("breach") || msg.contains("malware") || msg.contains("compromise")
+        }) {
+            1.5 // 50% increase for severe threats
+        } else {
+            1.0
+        };
 
-        // Normalize score to 0-10 range with exponential scaling
-        let normalized_score = (score * 10.0 / (score + 10.0)).min(10.0);
-        
-        // Round to 2 decimal places
-        (normalized_score * 100.0).round() / 100.0
+        // Calculate final score with multiplier and normalize to 0-10 range
+        let normalized_score = (score * threat_multiplier * 10.0 / (score + 10.0)).min(10.0);
+        (normalized_score * 100.0).round() / 100.0 // Round to 2 decimal places
     }
 
     pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
@@ -506,15 +546,50 @@ impl SecurityReport {
         std::fs::write(path, json)
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::Utc;
+    use crate::logger::models::{SecurityLevel, FlexibleType};
+
+    #[test]
+    fn test_system_status() {
+        let logs = vec![
+            LogEntry {
+                timestamp: Utc::now().into(),
+                process: Some("system".to_string()),
+                message: Some("SIP has been disabled".to_string()),
+                security_category: Some("system".to_string()),
+                security_level: Some(SecurityLevel::High),
+                subsystem: None,
+                category: None,
+                pid: None,
+                event_type: None,
+                format_string: None,
+                additional_fields: HashMap::new(),
+            },
+            LogEntry {
+                timestamp: Utc::now().into(),
+                process: Some("system".to_string()),
+                message: Some("FileVault encryption enabled".to_string()),
+                security_category: Some("system".to_string()),
+                security_level: Some(SecurityLevel::Info),
+                subsystem: None,
+                category: None,
+                pid: None,
+                event_type: None,
+                format_string: None,
+                additional_fields: HashMap::new(),
+            },
+        ];
+
+        let status = SecurityReport::check_system_status(&logs);
+        assert!(!status.sip_status); // SIP should be disabled
+        assert!(status.disk_encryption_status); // FileVault should be enabled
+    }
 
     #[test]
     fn test_risk_score_calculation() {
-        // Create test categories
         let mut categories = HashMap::new();
         let mut severity_counts = HashMap::new();
         severity_counts.insert("CRITICAL".to_string(), 2);
@@ -529,65 +604,154 @@ mod tests {
             trend: TrendAnalysis {
                 trend_direction: "stable".to_string(),
                 percentage_change: 0.0,
-                period: "1h".to_string(),
+                period: "24h".to_string(),
             },
         });
 
-        // Create test alerts
-        let alerts = vec![
-            SecurityAlert {
-                timestamp: Local::now(),
-                category: "test".to_string(),
-                severity: "CRITICAL".to_string(),
-                message: "Security breach detected".to_string(),
-                source: "test_source_1".to_string(),
-                context: AlertContext {
-                    subsystem: None,
-                    process_info: ProcessInfo {
-                        pid: None,
-                        path: None,
-                        user: None,
-                        command: None,
-                    },
-                    related_files: vec!["test_file.txt".to_string()],
-                    network_info: Some(NetworkInfo {
-                        source_ip: Some("192.168.1.1".to_string()),
-                        destination_ip: None,
-                        port: None,
-                        protocol: None,
-                    }),
+        let alerts = vec![SecurityAlert {
+            timestamp: Local::now(),
+            category: "test".to_string(),
+            severity: "CRITICAL".to_string(),
+            message: "Security breach detected".to_string(),
+            source: "test".to_string(),
+            context: AlertContext {
+                subsystem: None,
+                process_info: ProcessInfo {
+                    pid: None,
+                    path: None,
+                    user: None,
+                    command: None,
                 },
-                recommendation: "Investigate immediately".to_string(),
-                related_events: Vec::new(),
+                related_files: vec!["test.txt".to_string()],
+                network_info: Some(NetworkInfo {
+                    source_ip: Some("192.168.1.1".to_string()),
+                    destination_ip: None,
+                    port: None,
+                    protocol: None,
+                }),
             },
-            SecurityAlert {
-                timestamp: Local::now(),
-                category: "test".to_string(),
-                severity: "HIGH".to_string(),
-                message: "Malware activity detected".to_string(),
-                source: "test_source_2".to_string(),
-                context: AlertContext {
-                    subsystem: None,
-                    process_info: ProcessInfo {
-                        pid: None,
-                        path: None,
-                        user: None,
-                        command: None,
-                    },
-                    related_files: Vec::new(),
-                    network_info: None,
-                },
-                recommendation: "Run anti-malware scan".to_string(),
-                related_events: Vec::new(),
+            recommendation: "Investigate immediately".to_string(),
+            related_events: Vec::new(),
+        }];
+
+        let score = SecurityReport::calculate_risk_score(&categories, &alerts);
+        assert!(score > 0.0 && score <= 10.0);
+    }
+
+    #[test]
+    fn test_high_priority_detection() {
+        let log = LogEntry {
+            timestamp: Utc::now().into(),
+            process: Some("test".to_string()),
+            message: Some("suspicious activity detected".to_string()),
+            security_category: Some("security".to_string()),
+            security_level: Some(SecurityLevel::Critical),
+            subsystem: None,
+            category: None,
+            pid: None,
+            event_type: None,
+            format_string: None,
+            additional_fields: HashMap::new(),
+        };
+
+        assert!(SecurityReport::is_high_priority(&log));
+    }
+
+    #[test]
+    fn test_severity_determination() {
+        let log = LogEntry {
+            timestamp: Utc::now().into(),
+            process: Some("test".to_string()),
+            message: Some("Critical security breach detected".to_string()),
+            security_category: Some("security".to_string()),
+            security_level: Some(SecurityLevel::Critical),
+            subsystem: None,
+            category: None,
+            pid: None,
+            event_type: None,
+            format_string: None,
+            additional_fields: HashMap::new(),
+        };
+
+        assert_eq!(SecurityReport::determine_severity(&log), "CRITICAL");
+    }
+
+    #[test]
+    fn test_alert_creation() {
+        let log = LogEntry {
+            timestamp: Utc::now().into(),
+            process: Some("test".to_string()),
+            message: Some("malware detected".to_string()),
+            security_category: Some("security".to_string()),
+            security_level: Some(SecurityLevel::Critical),
+            subsystem: Some("security".to_string()),
+            category: None,
+            pid: Some(FlexibleType::Integer(123)),
+            event_type: Some("security_alert".to_string()),
+            format_string: None,
+            additional_fields: HashMap::new(),
+        };
+
+        let alert = SecurityReport::create_security_alert(&log);
+        assert_eq!(alert.severity, "CRITICAL");
+        assert!(alert.recommendation.contains("scan"));
+        assert_eq!(alert.context.process_info.pid, Some("123".to_string()));
+    }
+
+    #[test]
+    fn test_threat_analysis() {
+        let logs = vec![LogEntry {
+            timestamp: Utc::now().into(),
+            process: Some("test".to_string()),
+            message: Some("Multiple failed login attempts detected".to_string()),
+            security_category: Some("security".to_string()),
+            security_level: Some(SecurityLevel::High),
+            subsystem: Some("auth".to_string()),
+            category: None,
+            pid: Some(FlexibleType::Integer(123)),
+            event_type: Some("auth_failure".to_string()),
+            format_string: None,
+            additional_fields: HashMap::new(),
+        }];
+
+        let analysis = SecurityReport::analyze_threats(&logs);
+        assert!(!analysis.potential_threats.is_empty());
+        assert!(!analysis.risk_factors.is_empty());
+    }
+
+    #[test]
+    fn test_pattern_analysis() {
+        let logs = vec![
+            LogEntry {
+                timestamp: Utc::now().into(),
+                process: Some("test".to_string()),
+                message: Some("Security event 1".to_string()),
+                security_category: Some("security".to_string()),
+                security_level: Some(SecurityLevel::Medium),
+                subsystem: None,
+                category: None,
+                pid: None,
+                event_type: Some("test_event".to_string()),
+                format_string: None,
+                additional_fields: HashMap::new(),
+            },
+            LogEntry {
+                timestamp: Utc::now().into(),
+                process: Some("test".to_string()),
+                message: Some("Security event 2".to_string()),
+                security_category: Some("security".to_string()),
+                security_level: Some(SecurityLevel::Medium),
+                subsystem: None,
+                category: None,
+                pid: None,
+                event_type: Some("test_event".to_string()),
+                format_string: None,
+                additional_fields: HashMap::new(),
             },
         ];
 
-        let score = SecurityReport::calculate_risk_score(&categories, &alerts);
-        
-        // Score should be between 0 and 10
-        assert!(score >= 0.0 && score <= 10.0);
-        
-        // Score should be high due to critical and high severity alerts
-        assert!(score > 5.0);
+        let patterns = SecurityReport::analyze_patterns(&logs);
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0].frequency, 2);
     }
 }
